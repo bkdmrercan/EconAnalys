@@ -1,0 +1,8 @@
+streamlit
+matplotlib
+numpy
+pandas
+yfinance
+plotly
+PyPortfolioOpt
+bcrypt
