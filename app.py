@@ -1,5 +1,14 @@
 import streamlit as st
-from database import init_db, register_user, verify_user
+from database import (
+    SESSION_TTL_SECONDS,
+    create_session,
+    delete_session,
+    init_db,
+    refresh_session,
+    register_user,
+    verify_session,
+    verify_user,
+)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -12,43 +21,95 @@ import re
 import datetime
 from io import BytesIO
 import streamlit.components.v1 as components
+import ast
+import json
+import time
 
 st.set_page_config(layout="wide", page_title="EconAnalys", page_icon="")
 
 # Veritabanını başlat
 init_db()
 
-import time
+SESSION_COOKIE_NAME = "econanalys_session"
 
-# ─── SESSION STATE ───────────────────────────────────────────────────────────
-if 'logged_in' not in st.session_state:
-    # Sayfa yenilemelerinde (F5) oturumun kapanmaması için URL parametresi kontrolü
-    if 'user' in st.query_params:
-        st.session_state.logged_in = True
-        st.session_state.username = st.query_params['user']
-        st.session_state.last_activity = time.time()
-    else:
-        st.session_state.logged_in = False
-        st.session_state.last_activity = time.time()
 
-if 'username' not in st.session_state:
-    st.session_state.username = ""
+def set_session_cookie(token: str):
+    cookie_payload = json.dumps(token)
+    components.html(
+        f"""
+        <script>
+            document.cookie = "{SESSION_COOKIE_NAME}=" + encodeURIComponent({cookie_payload}) +
+                "; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
 
-# Oturum Zaman Aşımı Kontrolü (Örn: 1 Saat / 3600 saniye)
-if st.session_state.get('logged_in', False):
-    if time.time() - st.session_state.get('last_activity', time.time()) > 3600:
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.query_params.clear()
-        st.warning("Oturumunuz uzun süre işlem yapılmadığı için zaman aşımına uğradı.")
-        st.rerun()
-    else:
-        st.session_state.last_activity = time.time()
 
-def do_logout():
+def clear_session_cookie():
+    components.html(
+        f"""
+        <script>
+            document.cookie = "{SESSION_COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
+        </script>
+        """,
+        height=0,
+    )
+
+
+def clear_local_session():
     st.session_state.logged_in = False
     st.session_state.username = ""
-    st.query_params.clear()
+    st.session_state.session_token = ""
+    st.session_state.last_activity = time.time()
+
+
+def sync_session():
+    cookie_token = st.context.cookies.get(SESSION_COOKIE_NAME, "")
+    active_token = cookie_token or st.session_state.get("session_token", "")
+
+    if not active_token:
+        clear_local_session()
+        return
+
+    ok, username = verify_session(active_token)
+    if not ok:
+        delete_session(active_token)
+        clear_local_session()
+        st.session_state.clear_session_cookie = True
+        return
+
+    refresh_session(active_token, SESSION_TTL_SECONDS)
+    st.session_state.logged_in = True
+    st.session_state.username = username
+    st.session_state.session_token = active_token
+    st.session_state.last_activity = time.time()
+    st.session_state.set_session_cookie = active_token
+
+# ─── SESSION STATE ───────────────────────────────────────────────────────────
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "session_token" not in st.session_state:
+    st.session_state.session_token = ""
+if "last_activity" not in st.session_state:
+    st.session_state.last_activity = time.time()
+
+sync_session()
+
+if st.session_state.get("set_session_cookie"):
+    set_session_cookie(st.session_state.set_session_cookie)
+    del st.session_state["set_session_cookie"]
+
+if st.session_state.get("clear_session_cookie"):
+    clear_session_cookie()
+    del st.session_state["clear_session_cookie"]
+
+def do_logout():
+    delete_session(st.session_state.get("session_token", ""))
+    clear_local_session()
+    st.session_state.clear_session_cookie = True
 
 css = """
 <style>
@@ -477,9 +538,11 @@ if not st.session_state.logged_in:
                 if login_user and login_pass:
                     ok, msg = verify_user(login_user, login_pass)
                     if ok:
+                        session_token = create_session(login_user)
                         st.session_state.logged_in = True
                         st.session_state.username = login_user.strip().lower()
-                        st.query_params['user'] = login_user.strip().lower()
+                        st.session_state.session_token = session_token
+                        st.session_state.set_session_cookie = session_token
                         st.rerun()
                     else:
                         st.error(msg)
@@ -529,6 +592,58 @@ def clean_formula(f):
     f = f.replace('^', '**')
     f = re.sub(r'(?<![a-zA-Z])[pPqQsS](?![a-zA-Z])', 'x', f)
     return re.sub(r'(\d+)([a-zA-Z])', r'\1*\2', f)
+
+
+ALLOWED_FORMULA_FUNCS = {
+    "sin": np.sin,
+    "cos": np.cos,
+    "tan": np.tan,
+    "exp": np.exp,
+    "log": np.log,
+    "sqrt": np.sqrt,
+}
+
+
+def _eval_formula_node(node, names):
+    if isinstance(node, ast.Expression):
+        return _eval_formula_node(node.body, names)
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+
+    if isinstance(node, ast.Name) and node.id in names:
+        return names[node.id]
+
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        return +_eval_formula_node(node.operand, names)
+
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return -_eval_formula_node(node.operand, names)
+
+    if isinstance(node, ast.BinOp):
+        left = _eval_formula_node(node.left, names)
+        right = _eval_formula_node(node.right, names)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            return left / right
+        if isinstance(node.op, ast.Pow):
+            return left ** right
+
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ALLOWED_FORMULA_FUNCS:
+        args = [_eval_formula_node(arg, names) for arg in node.args]
+        return ALLOWED_FORMULA_FUNCS[node.func.id](*args)
+
+    raise ValueError("Desteklenmeyen formül ifadesi.")
+
+
+def safe_eval_formula(formula: str, x_values):
+    expr = ast.parse(formula, mode="eval")
+    return _eval_formula_node(expr, {"x": x_values, "pi": np.pi, "e": np.e})
 
 def metric_html(title, value, override_color=None):
     return f"""<div class="tv-metric-box"><div class="tv-metric-title">{title}</div><div class="tv-metric-value" style="color: {override_color or 'var(--neon-accent)'} !important;">{value}</div></div>"""
@@ -983,13 +1098,11 @@ with tab_mikro:
         with st.container(border=True):
             st.markdown("<div class='tv-title'> ARZ & TALEP DENGESİ</div>", unsafe_allow_html=True)
             x_arr = np.linspace(x_min, x_max, 4000)
-            s_d = {"x": x_arr, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "exp": np.exp, "log": np.log, "sqrt": np.sqrt, "__builtins__": {}}
             y_dem, y_sup, eq_q, eq_p, els = None, None, None, None, None
             try:
-                yd = eval(clean_formula(demand_formula), s_d)
+                yd = safe_eval_formula(clean_formula(demand_formula), x_arr)
                 y_dem = np.where(np.isinf(yd)|np.isnan(yd), np.nan, yd) if not np.isscalar(yd) else np.full_like(x_arr, float(np.real(yd)))
-                s_s = s_d.copy(); s_s["x"] = x_arr + tax
-                ys = eval(clean_formula(supply_formula), s_s)
+                ys = safe_eval_formula(clean_formula(supply_formula), x_arr + tax)
                 y_sup = np.where(np.isinf(ys)|np.isnan(ys), np.nan, ys) if not np.isscalar(ys) else np.full_like(x_arr, float(np.real(ys)))
                 diff = y_dem - y_sup
                 m = ~(np.isnan(y_dem) | np.isnan(y_sup))
@@ -1571,4 +1684,3 @@ with st.container(border=True):
 
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("<div class='econ-footer'>EconAnalys | designed by Quartet | Kocaeli University Economics</div>", unsafe_allow_html=True)
-
