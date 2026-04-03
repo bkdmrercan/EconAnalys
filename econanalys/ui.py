@@ -3,7 +3,7 @@ import textwrap
 import streamlit as st
 import streamlit.components.v1 as components
 
-from econanalys.theme import get_theme_mode, get_theme_tokens
+from econanalys.theme import THEME_COOKIE_NAME, get_theme_mode, get_theme_tokens
 
 
 def build_app_css(theme_mode):
@@ -205,6 +205,39 @@ def build_app_css(theme_mode):
 
         [data-testid="stMetric"] {{
             padding: 1rem 1.1rem !important;
+        }}
+
+        [data-testid="stExpander"] {{
+            background: transparent !important;
+        }}
+
+        [data-testid="stExpander"] details {{
+            overflow: hidden !important;
+        }}
+
+        [data-testid="stExpander"] summary {{
+            background: linear-gradient(180deg, var(--bg-card2) 0%, var(--bg-card) 100%) !important;
+            color: var(--text-primary) !important;
+            border-radius: 16px !important;
+            padding: 0.9rem 1rem !important;
+        }}
+
+        [data-testid="stExpander"] summary:hover,
+        [data-testid="stExpander"] summary:focus-visible {{
+            background: linear-gradient(180deg, var(--bg-hover) 0%, var(--bg-card) 100%) !important;
+        }}
+
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] summary span,
+        [data-testid="stExpander"] summary svg {{
+            color: var(--text-primary) !important;
+            fill: var(--text-primary) !important;
+        }}
+
+        [data-testid="stExpander"] details[open] summary {{
+            border-bottom: 1px solid var(--border) !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
         }}
 
         hr {{
@@ -562,6 +595,7 @@ def inject_styles(theme_mode=None):
         <script>
             const doc = window.parent.document;
             const theme = "{active_theme}";
+            const themeCookie = "{THEME_COOKIE_NAME}";
             const nodes = [
                 doc.documentElement,
                 doc.body,
@@ -572,6 +606,7 @@ def inject_styles(theme_mode=None):
             nodes.forEach((node) => {{
                 node.setAttribute("data-ea-theme", theme);
             }});
+            doc.cookie = `${{themeCookie}}=${{encodeURIComponent(theme)}}; Path=/; Max-Age=31536000; SameSite=Lax`;
             doc.body.classList.toggle("auth-shell", !doc.querySelector(".stApp [data-testid='stTabs']"));
         </script>
         """,

@@ -75,7 +75,7 @@ def render(tv_layout, dyn_template, colors):
                     w_df = pd.DataFrame(list(st.session_state['opt_w'].items()), columns=["Varlık", "Agirlik"])
                     fig = go.Figure(data=[go.Pie(labels=w_df['Varlık'], values=w_df['Agirlik'], hole=.45, textinfo='label+percent', textfont_size=14, marker={"colors": [color_blue, color_orange, color_green, color_red, '#00B0FF'], "line": {"color": 'rgba(0,0,0,0)', "width": 2}})])
                     fig.update_layout(template=dyn_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin={"t": 10, "b": 10}, height=400)
-                    st.plotly_chart(fig, width="stretch", use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True)
 
                     p0, p1, p2 = st.session_state['opt_p']
                     cp1, cp2, cp3 = st.columns(3)
@@ -101,7 +101,7 @@ def render(tv_layout, dyn_template, colors):
                         ))
                         fig_c.update_layout(**tv_layout)
                         fig_c.update_layout(height=400, margin={"t":20,"b":20})
-                        st.plotly_chart(fig_c, width="stretch", use_container_width=True)
+                        st.plotly_chart(fig_c, use_container_width=True)
 
                         if high_corr_warning:
                             st.warning(f" **Yapay Zeka Risk Uyarısı:** Seçtiğiniz portföydeki bazı hisseler ({', '.join(high_pairs)}) birbirleriyle **çok yüksek pozitif korelasyona (>0.8)** sahip. Bu durum aynı sektörden çok fazla hisse seçtiğinizi veya piyasa riskini çeşitlendiremediğinizi gösterir. Düşüş anında portföyünüz aynı anda topyekün zarar edebilir!")

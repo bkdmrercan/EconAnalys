@@ -1,6 +1,10 @@
 import streamlit as st
 
 
+THEME_COOKIE_NAME = "econanalys_theme"
+VALID_THEME_MODES = {"light", "dark"}
+
+
 THEME_TOKENS = {
     "light": {
         "accent": "#2563EB",
@@ -59,9 +63,17 @@ THEME_TOKENS = {
 }
 
 
+def _normalize_theme_mode(value):
+    if not value:
+        return None
+    normalized = str(value).strip().strip('"').strip("'").lower()
+    return normalized if normalized in VALID_THEME_MODES else None
+
+
 def initialize_theme_state():
     if "theme_mode" not in st.session_state:
-        st.session_state.theme_mode = "light"
+        cookie_theme = _normalize_theme_mode(st.context.cookies.get(THEME_COOKIE_NAME))
+        st.session_state.theme_mode = cookie_theme or "light"
 
 
 def toggle_theme_mode():
@@ -71,7 +83,7 @@ def toggle_theme_mode():
 
 def get_theme_mode():
     initialize_theme_state()
-    return "dark" if st.session_state.theme_mode == "dark" else "light"
+    return "dark" if _normalize_theme_mode(st.session_state.theme_mode) == "dark" else "light"
 
 
 def get_theme_tokens(theme_mode=None):
