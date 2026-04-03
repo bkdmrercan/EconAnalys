@@ -93,7 +93,7 @@ def render(tv_layout, colors):
 
                         fig.update_layout(**tv_layout)
                         fig.update_layout(height=550 if show_rsi else 450)
-                        st.plotly_chart(fig, width="stretch", use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True)
 
                         # Info Metrics
                         info = ticker.info
